@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from monty.json import MSONable
 
 import jobflow
-from jobflow.core.reference import OutputReference, find_and_get_references
+from jobflow.core.reference import find_and_get_references
 from jobflow.utils import ValueEnum, contains_flow_or_job, suid
 
 if TYPE_CHECKING:
@@ -928,14 +928,73 @@ def get_flow(
 class DecoratedFlow(Flow):
     """A DecoratedFlow is a Flow that is returned on using the @flow decorator."""
 
-    def __init__(self, fn, *args, **kwargs):
+    def __init__(self, fn, *args, flow_kwargs=None, **kwargs):
         # jobs are added when .run() is called
         super().__init__(name=fn.__name__, jobs=[])
         self.fn = fn
         self.args = args
         self.kwargs = kwargs
+        self.flow_kwargs = flow_kwargs or {}
 
         self._build()
+
+    def get_output(
+        self,
+        responses: dict[str, dict[int, jobflow.Response]],
+        output_ref: Any | None = None,
+    ) -> Any:
+        """
+        Get the output of the Flow, possibly resolved.
+
+        Get the output of this Flow, from a responses dict generated after
+        execution. The returned value is either the unchanged `responses`
+        dict, or the recursively-resolved output(s).
+
+        Parameters
+        ----------
+        responses
+            The responses of the jobs in the flow, as a dict of
+            ``{uuid: {index: response}}``.
+        output_ref
+            The output reference to resolve. If None, the output reference
+            of this `Flow` object is resolved.
+
+        Returns
+        -------
+            Either the (unchanged) responses of the jobs in the flow,
+             or the resolved values of the output references of the flow, if
+             the `@flow` decorator was instantiated with `return_dict=False`.
+        """
+
+        def _get_final_response(output_ref):
+            # Get the final output of a job, possibly recursively if it has been
+            # replaced.
+            final_output_ref_index = max(responses[output_ref.uuid].keys())
+            final_output_ref_response = responses[output_ref.uuid][
+                final_output_ref_index
+            ]
+            if final_output_ref_response.replace is not None:
+                return [
+                    _get_final_response(job)
+                    for job in final_output_ref_response.replace.jobs
+                ]
+            return final_output_ref_response.output
+
+        # Are we returning a dictionary of responses (default), or the latest
+        # resolved values of the output reference(s)?
+        if self.flow_kwargs.get("return_dict", True):
+            return responses
+        if output_ref is None:
+            output_ref = self.output
+
+        if isinstance(output_ref, (list, tuple)):
+            return type(output_ref)(self.get_output(responses, i) for i in output_ref)
+        if isinstance(output_ref, dict):
+            return {k: self.get_output(responses, output_ref[k]) for k in output_ref}
+
+        if hasattr(output_ref, "uuid"):
+            return _get_final_response(output_ref)
+        return output_ref
 
     def _build(self):
         with flow_build_context(self):
@@ -943,15 +1002,11 @@ class DecoratedFlow(Flow):
 
         if isinstance(output, (jobflow.Job, jobflow.Flow)):
             output = output.output
-        elif not isinstance(output, OutputReference):
-            raise RuntimeError(
-                "A @flow decorated function must return a Job or an OutputReference"
-            )
 
         self.output = output
 
 
-def flow(fn):
+def flow(fn=None, **flow_kwargs):
     """
     Turn a function into a DecoratedFlow object.
 
@@ -965,9 +1020,11 @@ def flow(fn):
         an instance of DecoratedFlow initialized with the provided function
         and its arguments.
     """
+    if fn is None:
+        return lambda fn: flow(fn, **flow_kwargs)
 
     def wrapper(*args, **kwargs):
-        decorated_flow = DecoratedFlow(fn, *args, **kwargs)
+        decorated_flow = DecoratedFlow(fn, *args, flow_kwargs=flow_kwargs, **kwargs)
         if (flow_context := _current_flow_context.get()) is not None:
             flow_context.add_jobs(decorated_flow)
         return decorated_flow

@@ -124,6 +124,38 @@ def test_flow_returns_job():
     assert result[flow1.output.uuid][1].output == 7
 
 
+def test_flow_returns_job_int_output():
+    """Test that a flow that returns a Job and is instantiated with
+    `return_dict=False` can be run locally and returns the correct int output
+    value."""
+    from jobflow import flow
+    from jobflow.managers.local import run_locally
+
+    @flow(return_dict=False)
+    def my_flow(a, b):
+        return add(a, b)
+
+    flow1 = my_flow(3, 4)
+    result = run_locally(flow1, ensure_success=True)
+    assert result == 7
+
+
+def test_flow_returns_job_list_output():
+    """Test that a flow that returns a Job and is instantiated with
+    `return_dict=False` can be run locally and returns the correct list output
+    value."""
+    from jobflow import flow
+    from jobflow.managers.local import run_locally
+
+    @flow(return_dict=False)
+    def my_flow(a, b):
+        return [add(a, a), add(b, b), add(a, b)]
+
+    flow1 = my_flow(3, 4)
+    result = run_locally(flow1, ensure_success=True)
+    assert result == [6, 8, 7]
+
+
 def test_flow_returns_output_reference():
     """Test that a flow that returns an OutputReference can be run locally and
     returns the correct output."""
@@ -137,19 +169,6 @@ def test_flow_returns_output_reference():
     flow1 = my_flow(3, 4)
     result = run_locally(flow1, ensure_success=True)
     assert result[flow1.output.uuid][1].output == 7
-
-
-def test_flow_returns_invalid():
-    """Test that a flow that doesn't return a Job or OutputReference
-    raises a RuntimeError when created."""
-    from jobflow import flow
-
-    @flow
-    def my_flow(a, b):
-        return 42
-
-    with pytest.raises(RuntimeError):
-        _ = my_flow(3, 4)
 
 
 def test_flow_nested():

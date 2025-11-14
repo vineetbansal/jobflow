@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 import typing
 
+from jobflow.core.flow import DecoratedFlow
+
 if typing.TYPE_CHECKING:
     from pathlib import Path
 
@@ -183,4 +185,6 @@ def run_locally(
     if ensure_success and not finished_successfully:
         raise RuntimeError("Flow did not finish running successfully")
 
+    if isinstance(flow, DecoratedFlow):
+        return flow.get_output(responses)
     return dict(responses)
