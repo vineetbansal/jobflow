@@ -1279,19 +1279,16 @@ class Response(typing.Generic[T]):
         Response
             The job response controlling the data to store and flow execution options.
         """
-
-        # If the Job returns another Job, or something that can be iterpreted
+        # If the Job returns another Job, or something that can be interpreted
         # as an iterable of jobs, interpret it as a replace.
         from jobflow import Flow
-        is_job_or_flow = lambda x: isinstance(x, (Job, Flow))
 
-        should_replace = False
-        if is_job_or_flow(job_returns):
-            should_replace = True
-        elif isinstance(job_returns, (list, tuple)):
+        def is_job_or_flow(x):
+            return isinstance(x, Job | Flow)
+
+        should_replace = is_job_or_flow(job_returns)
+        if isinstance(job_returns, (list, tuple)):
             should_replace = all(is_job_or_flow(resp) for resp in job_returns)
-        elif isinstance(job_returns, dict):
-            should_replace = all(is_job_or_flow(v) for v in job_returns.values())
 
         if should_replace:
             job_returns = Response(replace=job_returns)
